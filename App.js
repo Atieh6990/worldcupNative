@@ -304,6 +304,7 @@ const App: () => Node = () => {
         setRateVideo(data);
         break;
       case "fullscreen":
+        
         // alert(data);
         // console.log(data, isFull);
         if (data == true) {
