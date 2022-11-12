@@ -69,7 +69,7 @@ const App: () => Node = () => {
 
 
   useEffect(() => {
-    alert(I18nManager.isRTL)
+    // alert(I18nManager.isRTL)
     if(I18nManager.isRTL){
       setFullScreenVideo({
         position: "absolute",
