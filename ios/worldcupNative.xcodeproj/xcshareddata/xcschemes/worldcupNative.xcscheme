@@ -15,9 +15,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "13B07F861A680F5B00A75B9A"
-               BuildableName = "worldcupNative.app"
-               BlueprintName = "worldcupNative"
-               ReferencedContainer = "container:worldcupNative.xcodeproj">
+               BuildableName = "worldcup.app"
+               BlueprintName = "worldcup"
+               ReferencedContainer = "container:worldcup.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -33,9 +33,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "00E356ED1AD99517003FC87E"
-               BuildableName = "worldcupNativeTests.xctest"
-               BlueprintName = "worldcupNativeTests"
-               ReferencedContainer = "container:worldcupNative.xcodeproj">
+               BuildableName = "worldcupTests.xctest"
+               BlueprintName = "worldcupTests"
+               ReferencedContainer = "container:worldcup.xcodeproj">
             </BuildableReference>
          </TestableReference>
       </Testables>
@@ -55,9 +55,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "13B07F861A680F5B00A75B9A"
-            BuildableName = "worldcupNative.app"
-            BlueprintName = "worldcupNative"
-            ReferencedContainer = "container:worldcupNative.xcodeproj">
+            BuildableName = "worldcup.app"
+            BlueprintName = "worldcup"
+            ReferencedContainer = "container:worldcup.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -72,9 +72,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "13B07F861A680F5B00A75B9A"
-            BuildableName = "worldcupNative.app"
-            BlueprintName = "worldcupNative"
-            ReferencedContainer = "container:worldcupNative.xcodeproj">
+            BuildableName = "worldcup.app"
+            BlueprintName = "worldcup"
+            ReferencedContainer = "container:worldcup.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

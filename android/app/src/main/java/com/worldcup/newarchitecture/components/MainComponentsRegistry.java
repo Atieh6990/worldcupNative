@@ -1,4 +1,4 @@
-package com.worldcupnative.newarchitecture.components;
+package com.worldcup.newarchitecture.components;
 
 import com.facebook.jni.HybridData;
 import com.facebook.proguard.annotations.DoNotStrip;
