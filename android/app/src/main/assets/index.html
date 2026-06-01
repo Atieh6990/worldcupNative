@@ -6,92 +6,149 @@
     <title>worldcup</title>
     <script type="text/javascript" src="$WEBAPIS/webapis/webapis.js"></script>
     <script type="text/javascript" src="js/jquery-1.12.4.min.js"></script>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            background-color: #0d0d0d;
+            overflow: hidden;
+        }
 
+        body {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            width: 1920px;
+            height: 1080px;
+        }
+
+        #app-loader {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #0d0d0d;
+            z-index: 9999;
+        }
+
+        #app-loader.hidden {
+            display: none;
+        }
+
+        .loader-spinner {
+            width: 56px;
+            height: 56px;
+            border: 4px solid rgba(255, 255, 255, 0.15);
+            border-top-color: #ffffff;
+            border-radius: 50%;
+            animation: spin 0.9s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        #app {
+            min-height: 100%;
+        }
+    </style>
 </head>
-<body style="   position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    width: 1920px;
-    height: 1080px;
-    overflow: hidden;">
-<div id="app">
-<!--            <div style="position: absolute;width: 100px;height: 200px;top: 50px;left: 50px; background-color: blue"></div>-->
+<body>
+<div id="app-loader">
+    <div class="loader-spinner"></div>
 </div>
-
+<div id="app"></div>
 
 <script>
-    setTimeout(startLoad, 20);
+    function notifyAppReady() {
+        if (window.ReactNativeWebView) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'webReady',
+                data: ''
+            }));
+        }
+    }
 
+    function hideLoader() {
+        var loader = document.getElementById('app-loader');
+        if (loader) {
+            loader.className = 'hidden';
+        }
+    }
 
+    function watchAppMount(onReady) {
+        var app = document.getElementById('app');
+        var readySent = false;
 
-    function startLoad(){
+        function tryReady() {
+            if (readySent || !app) {
+                return;
+            }
 
+            if (app.children.length > 0) {
+                readySent = true;
+                observer.disconnect();
+                clearInterval(pollTimer);
+                clearTimeout(fallbackTimer);
+                hideLoader();
+                onReady();
+            }
+        }
 
-        // alert('startLoad !!!!')
+        var observer = new MutationObserver(tryReady);
+        observer.observe(app, { childList: true, subtree: true });
+        var pollTimer = setInterval(tryReady, 100);
+        var fallbackTimer = setTimeout(function () {
+            if (!readySent) {
+                readySent = true;
+                observer.disconnect();
+                clearInterval(pollTimer);
+                hideLoader();
+                onReady();
+            }
+        }, 15000);
 
+        tryReady();
+    }
+
+    function startLoad() {
         var el = document.createElement('script');
-        // el.src = 'https://tvapps.ir/worldcup/test_1/js/build.js?t=' + new Date().getTime()
-        el.src = 'https://fifapanel.tvapps.ir/web/andriod/build.js?t=' + new Date().getTime()
-        // el.src = 'https://fifapanel.tvapps.ir/web/test/build.js?t=' + new Date().getTime()
-        // el.src = 'https://samyar.rasgames.ir/worldcup/android/js/build.js?t=' + new Date().getTime()
-        document.body.appendChild(el);
-
-        // var el2 = document.createElement('script');
-        // el2.src = 'https://samyar.rasgames.ir/worldcup/android/js/app.7908d43b.js'
-        // document.body.appendChild(el2);
-
-
-
-
-        // el2.onload = function () {
-        //     console.log('el2 script loaded successfully')
-        // }
-        //
-        //
-        // el2.onerror = function () {
-        //     console.log('el2 script failed to load')
-        // }
+        el.src = 'https://fifapanel.tvapps.ir/web/andriod/build.js?t=' + new Date().getTime();
 
         el.onload = function () {
-            // alert('el script loaded successfully')
-        }
+            watchAppMount(notifyAppReady);
+        };
+
         el.onerror = function () {
-            // alert('el script failed to load');
+            hideLoader();
+            notifyAppReady();
             document.addEventListener('keydown', function (e) {
-                console.log('keydown', e)
+                console.log('keydown', e);
                 switch (e.keyCode) {
-                    case 37: //LEFT arrow
+                    case 37:
+                    case 38:
+                    case 39:
+                    case 40:
+                    case 13:
                         break;
-                    case 38: //UP arrow
-                        break;
-                    case 39: //RIGHT arrow
-                        break;
-                    case 40: //DOWN arrow
-                        break;
-                    case 13: //OK button
-                        break;
-                    case 10009: //RETURN button
-                    case 10182: //EXIT button
+                    case 10009:
+                    case 10182:
                         console.log('return888888888888888888888888');
-                        // tizen.application.getCurrentApplication().exit();
                         break;
                     default:
                         console.log('Key code : ' + e.keyCode);
                         break;
                 }
             });
-        }
+        };
 
-
+        document.body.appendChild(el);
     }
+
+    startLoad();
 </script>
 </body>
-
-
-<script>
-    // axios.defaults.headers.common['Access-Control-Allow-Origin'] = '*';
-</script>
-
 </html>

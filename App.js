@@ -34,6 +34,7 @@ const App: () => Node = () => {
   let player = {};
   const [ref, setRef] = useState(true);
   const [spinner, setSpinner] = useState(true);
+  const [deviceInfoReady, setDeviceInfoReady] = useState(false);
   const [userData, setUserData] = useState({});
   const [macAddress, setMacAddress] = useState("");
   const [macLan, setMacLan] = useState("");
@@ -84,8 +85,14 @@ const App: () => Node = () => {
         left: 0, top: 0,})
     }
 
-    getMacId();
-    getMacLan();
+    Promise.all([
+      DeviceInfo.getMacLanAddress().catch(() => ""),
+      DeviceInfo.getMacAddress().catch(() => ""),
+    ]).then(([lan, mac]) => {
+      setMacLan(lan || "");
+      setMacAddress(mac || "");
+      setDeviceInfoReady(true);
+    });
   }, []);
   useEffect(() => {
     // _enableTVEventHandler();
@@ -93,28 +100,16 @@ const App: () => Node = () => {
       BackHandler.addEventListener("hardwareBackPress", onAndroidBackPress);
       dealWithPermissions();
     }
+
+    const spinnerFallback = setTimeout(() => setSpinner(false), 25000);
+
     return () => {
+      clearTimeout(spinnerFallback);
       if (Platform.OS === "android") {
         BackHandler.removeEventListener("hardwareBackPress");
       }
     };
   }, []);
-
-  const getMacLan = () => {
-    DeviceInfo.getMacLanAddress().then((result) => {
-      // console.log("result", result);
-      setMacLan(result);
-    })
-      .catch((error) => console.warn("getMac: no", error));
-  };
-
-  const getMacId = () => {
-    DeviceInfo.getMacAddress().then((mac) => {
-      // console.log("mac", mac);
-      setMacAddress(mac);
-    });
-  };
-
 
   const onAndroidBackPress = () => {
     //console.log(JSON.stringify(this.webView))
@@ -282,6 +277,9 @@ const App: () => Node = () => {
     // dleOnMessage type ===>  ' , JSON.parse(event.nativeEvent.data));
     // console.log('handleOnMessage data ===>  ' , data , type);
     switch (type) {
+      case "webReady":
+        setSpinner(false);
+        break;
       case "browser":
         handlePress(data);
         break;
@@ -384,26 +382,31 @@ const App: () => Node = () => {
   };
 
   const renderWebview = () => {
+    if (!deviceInfoReady) {
+      return null;
+    }
+
+    const webViewSource = {
+      uri:
+        "file:///android_asset/index.html?mac_lan=" +
+        macLan +
+        "&version=" + DeviceInfo.getSystemVersion() +
+        "&mac=" + macAddress +
+        "&uid=" + uid +
+        "&tv_type=" + tvType,
+    };
+
     return (
 
       <WebView
-        onLoadEnd={() => setSpinner(false)}
         onMessage={handleOnMessage}
         originWhitelist={["*"]}
         useWebKit={true}
         allowFileAccess={true}
         allowUniversalAccessFromFileURLs={true}
         mediaPlaybackRequiresUserAction={false}
-        source={{
-          uri:
-            "file:///android_asset/index.html?mac_lan=" +
-            macLan +
-            "&version=" + DeviceInfo.getSystemVersion() +
-            "&mac=" + macAddress +
-            "&uid=" + uid +
-            "&tv_type=" + tvType +
-            "&t=" + new Date().getTime(),
-        }}
+        style={styles.webview}
+        source={webViewSource}
         //         source={ { uri : "http://samyar.rasgames.ir/varzesh3/android/index.html?t="+new Date().getTime()}}
         // source={{ uri: "https://www.varzesh3.com/" }}
         ref={(ref) => {
@@ -431,7 +434,8 @@ const App: () => Node = () => {
       <Spinner
         visible={spinner}
         textContent={""}
-        textStyle={{ color: "#000000" }}
+        overlayColor="rgba(13, 13, 13, 0.95)"
+        textStyle={{ color: "#ffffff" }}
       />
       {renderWebview()}
       {_renderVideo()}
@@ -440,6 +444,10 @@ const App: () => Node = () => {
 };
 
 const styles = StyleSheet.create({
+  webview: {
+    flex: 1,
+    backgroundColor: "#0d0d0d",
+  },
   Pdirection: {     position: "absolute",
     width: "82%",
     height: "100%",
