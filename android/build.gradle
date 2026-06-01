@@ -49,3 +49,12 @@ allprojects {
         maven { url 'https://www.jitpack.io' }
     }
 }
+
+subprojects { subproject ->
+    subproject.buildscript {
+        repositories {
+            google()
+            mavenCentral()
+        }
+    }
+}
