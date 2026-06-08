@@ -2,10 +2,56 @@
 <html lang="en" dir="rtl">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=1920px;">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <base href="file:///android_asset/">
     <title>worldcup</title>
-    <script type="text/javascript" src="$WEBAPIS/webapis/webapis.js"></script>
-    <script type="text/javascript" src="js/jquery-1.12.4.min.js"></script>
+    <script>
+        function parseQueryParams(search) {
+            var params = {};
+            var query = search || window.location.search || '';
+            if (query.charAt(0) === '?') {
+                query = query.substring(1);
+            }
+            if (!query) {
+                return params;
+            }
+            var pairs = query.split('&');
+            for (var i = 0; i < pairs.length; i++) {
+                var pair = pairs[i].split('=');
+                var key = decodeURIComponent(pair[0] || '');
+                var value = decodeURIComponent(pair[1] || '');
+                if (key) {
+                    params[key] = value;
+                }
+            }
+            return params;
+        }
+
+        (function () {
+            var params = parseQueryParams();
+            if (params.webview !== '1') {
+                return;
+            }
+
+            var designHeight = 1080;
+            var panelWidth = parseInt(params.panel_w, 10) || 350;
+            var panelHeight = parseInt(params.panel_h, 10) || designHeight;
+            var scale = panelHeight / designHeight;
+
+            document.documentElement.className = 'webview-panel';
+            document.documentElement.setAttribute('dir', 'ltr');
+            document.documentElement.style.setProperty('--panel-scale', String(scale));
+
+            var viewportMeta = document.querySelector('meta[name="viewport"]');
+            if (viewportMeta) {
+                viewportMeta.setAttribute(
+                    'content',
+                    'width=' + panelWidth + ', height=' + panelHeight +
+                    ', initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no'
+                );
+            }
+        })();
+    </script>
     <style>
         html, body {
             margin: 0;
@@ -24,6 +70,41 @@
             height: 1080px;
         }
 
+        html.webview-panel,
+        html.webview-panel body {
+            position: fixed;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+
+        html.webview-panel {
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            max-width: 100%;
+            max-height: 100%;
+            direction: ltr;
+            -webkit-text-size-adjust: 100%;
+        }
+
+        html.webview-panel body {
+            width: 1920px;
+            height: 1080px;
+            top: 0;
+            right: 0;
+            bottom: auto;
+            left: auto;
+            transform: scale(var(--panel-scale, 1));
+            transform-origin: top right;
+        }
+
+        html.webview-panel #app {
+            width: 1920px;
+            height: 1080px;
+            overflow: hidden;
+        }
+
         #app-loader {
             position: fixed;
             inset: 0;
@@ -36,6 +117,25 @@
 
         #app-loader.hidden {
             display: none;
+        }
+
+        #load-error {
+            display: none;
+            position: fixed;
+            inset: 0;
+            align-items: center;
+            justify-content: center;
+            color: #ffffff;
+            background-color: #0d0d0d;
+            font-family: sans-serif;
+            font-size: 28px;
+            text-align: center;
+            padding: 40px;
+            z-index: 10000;
+        }
+
+        #load-error.visible {
+            display: flex;
         }
 
         .loader-spinner {
@@ -60,9 +160,272 @@
 <div id="app-loader">
     <div class="loader-spinner"></div>
 </div>
+<div id="load-error">خطا در بارگذاری build.js</div>
 <div id="app"></div>
 
 <script>
+    window.__webpack_public_path__ = 'file:///android_asset/';
+
+    (function () {
+        var lastPlayVideoUrl = '';
+        var lastPlayVideoAt = 0;
+
+        function shouldSkipPlayVideoMessage(message) {
+            try {
+                var payload = JSON.parse(message);
+                if (!payload || payload.type !== 'playVideo' || !payload.data) {
+                    return false;
+                }
+                var nextUrl = (payload.data.video || '').trim().replace(/\/+$/, '');
+                if (!nextUrl) {
+                    return false;
+                }
+                var now = Date.now();
+                if (nextUrl === lastPlayVideoUrl && now - lastPlayVideoAt < 5000) {
+                    return true;
+                }
+                lastPlayVideoUrl = nextUrl;
+                lastPlayVideoAt = now;
+                return false;
+            } catch (error) {
+                return false;
+            }
+        }
+
+        function wrapNativeBridge(bridge) {
+            if (!bridge || bridge.__playVideoDeduped || !bridge.postMessage) {
+                return bridge;
+            }
+
+            var originalPostMessage = bridge.postMessage.bind(bridge);
+            bridge.postMessage = function (message) {
+                if (shouldSkipPlayVideoMessage(message)) {
+                    return;
+                }
+                return originalPostMessage(message);
+            };
+            bridge.__playVideoDeduped = true;
+            return bridge;
+        }
+
+        function installPlayVideoDedup() {
+            if (window.ReactNativeWebView) {
+                window.ReactNativeWebView = wrapNativeBridge(window.ReactNativeWebView);
+            }
+        }
+
+        installPlayVideoDedup();
+        setInterval(installPlayVideoDedup, 100);
+    })();
+
+    var DESIGN_WIDTH = 1920;
+    var DESIGN_HEIGHT = 1080;
+    var PANEL_SLICE_WIDTH = 350;
+
+    var NATIVE_BACK_CODES = { 4: 1, 8: 1, 27: 1, 96: 1, 111: 1, 461: 1, 10009: 1 };
+    var lastNativeBackAt = 0;
+
+    window.handleNativeBack = function () {
+        var now = Date.now();
+        if (now - lastNativeBackAt < 400) {
+            return;
+        }
+        lastNativeBackAt = now;
+
+        var params = { type: 'returnPage', data: '' };
+        var backCodes = [4, 8, 27, 96, 111, 461, 10009];
+
+        if (window.vm && window.vm.$emit) {
+            window.vm.$emit('PostMessages', params);
+        }
+
+        if (window.controller && typeof window.controller.handleBack === 'function') {
+            window.controller.handleBack();
+        }
+
+        if (typeof window.handleBack === 'function') {
+            window.handleBack();
+        }
+
+        backCodes.forEach(function (code) {
+            var eventInit = {
+                keyCode: code,
+                which: code,
+                bubbles: true,
+                cancelable: true
+            };
+            window.dispatchEvent(new KeyboardEvent('keydown', eventInit));
+            document.dispatchEvent(new KeyboardEvent('keydown', eventInit));
+            document.body.dispatchEvent(new KeyboardEvent('keydown', eventInit));
+        });
+    };
+
+    (function installNativeBackCapture() {
+        function onBackKeyDown(e) {
+            var code = e.keyCode || e.which;
+            if (!NATIVE_BACK_CODES[code]) {
+                return;
+            }
+            if (e.preventDefault) {
+                e.preventDefault();
+            }
+            if (e.stopPropagation) {
+                e.stopPropagation();
+            }
+            if (e.stopImmediatePropagation) {
+                e.stopImmediatePropagation();
+            }
+            window.handleNativeBack();
+            return false;
+        }
+
+        document.addEventListener('keydown', onBackKeyDown, true);
+        window.addEventListener('keydown', onBackKeyDown, true);
+    })();
+
+    (function installPanelActivityBridge() {
+        var params = parseQueryParams();
+        if (params.webview !== '1') {
+            return;
+        }
+
+        window.__nativePanelVisible = true;
+        var lastActivityAt = 0;
+        var ACTIVITY_DEBOUNCE_MS = 250;
+
+        function notifyPanelActivity(event) {
+            if (window.__nativePanelVisible === false) {
+                return;
+            }
+
+            if (event && event.type === 'keydown') {
+                if (event.repeat) {
+                    return;
+                }
+                if (event.isTrusted === false) {
+                    return;
+                }
+            }
+
+            if (event && event.isTrusted === false) {
+                return;
+            }
+
+            var now = Date.now();
+            if (now - lastActivityAt < ACTIVITY_DEBOUNCE_MS) {
+                return;
+            }
+            lastActivityAt = now;
+
+            if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+                window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'panelActivity',
+                    data: ''
+                }));
+            }
+        }
+
+        document.addEventListener('click', notifyPanelActivity, true);
+        document.addEventListener('mousedown', notifyPanelActivity, true);
+        document.addEventListener('touchstart', notifyPanelActivity, true);
+        document.addEventListener('keydown', notifyPanelActivity, true);
+
+        window.addEventListener('nativePanelVisibility', function (event) {
+            if (event && event.detail) {
+                window.__nativePanelVisible = event.detail.visible !== false;
+            }
+        });
+    })();
+
+    function getPanelViewportSize() {
+        var htmlRect = document.documentElement.getBoundingClientRect();
+        var viewWidth = htmlRect.width;
+        var viewHeight = htmlRect.height;
+        var query = parseQueryParams();
+
+        if (viewWidth < 1) {
+            viewWidth = parseInt(query.panel_w, 10) || PANEL_SLICE_WIDTH;
+        }
+        if (viewHeight < 1) {
+            viewHeight = parseInt(query.panel_h, 10) || DESIGN_HEIGHT;
+        }
+
+        if (window.__nativePanelHeight > 0) {
+            viewHeight = window.__nativePanelHeight;
+        }
+        if (window.__nativePanelWidth > 0) {
+            viewWidth = window.__nativePanelWidth;
+        }
+
+        return {
+            viewWidth: viewWidth,
+            viewHeight: viewHeight
+        };
+    }
+
+    var lockedPanelScale = null;
+    var lockedViewWidth = null;
+    var lockedViewHeight = null;
+
+    function applyPanelScale(viewWidth, viewHeight, scale) {
+        document.documentElement.style.width = viewWidth + 'px';
+        document.documentElement.style.height = viewHeight + 'px';
+        document.documentElement.style.maxHeight = viewHeight + 'px';
+        document.documentElement.style.setProperty('--panel-scale', String(scale));
+        document.body.style.width = DESIGN_WIDTH + 'px';
+        document.body.style.height = DESIGN_HEIGHT + 'px';
+        document.body.style.transform = 'scale(' + scale + ')';
+        document.body.style.transformOrigin = 'top right';
+        document.body.style.right = '0';
+        document.body.style.left = 'auto';
+        document.body.style.top = '0';
+    }
+
+    function lockPanelViewport() {
+        if (!document.documentElement.classList.contains('webview-panel')) {
+            return;
+        }
+
+        var viewport = getPanelViewportSize();
+        lockedViewWidth = viewport.viewWidth;
+        lockedViewHeight = viewport.viewHeight;
+        lockedPanelScale = lockedViewHeight / DESIGN_HEIGHT;
+        applyPanelScale(lockedViewWidth, lockedViewHeight, lockedPanelScale);
+    }
+
+    function applyLockedPanelScale() {
+        if (!document.documentElement.classList.contains('webview-panel')) {
+            return;
+        }
+
+        if (lockedPanelScale === null) {
+            lockPanelViewport();
+            return;
+        }
+
+        applyPanelScale(lockedViewWidth, lockedViewHeight, lockedPanelScale);
+    }
+
+    function schedulePanelFit() {
+        if (lockedPanelScale !== null) {
+            applyLockedPanelScale();
+            return;
+        }
+        lockPanelViewport();
+    }
+
+    window.lockPanelViewport = lockPanelViewport;
+    window.applyLockedPanelScale = applyLockedPanelScale;
+    window.schedulePanelFit = schedulePanelFit;
+
+    (function () {
+        var params = parseQueryParams();
+        if (params.webview === '1') {
+            document.body.setAttribute('dir', 'ltr');
+            schedulePanelFit();
+        }
+    })();
+
     function notifyAppReady() {
         if (window.ReactNativeWebView) {
             window.ReactNativeWebView.postMessage(JSON.stringify({
@@ -77,6 +440,16 @@
         if (loader) {
             loader.className = 'hidden';
         }
+    }
+
+    function showLoadError(message) {
+        hideLoader();
+        var errorBox = document.getElementById('load-error');
+        if (errorBox) {
+            errorBox.textContent = message || 'خطا در بارگذاری build.js';
+            errorBox.className = 'visible';
+        }
+        notifyAppReady();
     }
 
     function watchAppMount(onReady) {
@@ -94,6 +467,7 @@
                 clearInterval(pollTimer);
                 clearTimeout(fallbackTimer);
                 hideLoader();
+                lockPanelViewport();
                 onReady();
             }
         }
@@ -106,49 +480,25 @@
                 readySent = true;
                 observer.disconnect();
                 clearInterval(pollTimer);
-                hideLoader();
-                onReady();
+                showLoadError('build.js لود شد ولی اپ mount نشد');
             }
         }, 15000);
 
         tryReady();
     }
 
-    function startLoad() {
-        var el = document.createElement('script');
-        el.src = 'https://fifapanel.tvapps.ir/web/andriod/build.js?t=' + new Date().getTime();
-
-        el.onload = function () {
+    function onBuildLoaded() {
+        try {
             watchAppMount(notifyAppReady);
-        };
-
-        el.onerror = function () {
-            hideLoader();
-            notifyAppReady();
-            document.addEventListener('keydown', function (e) {
-                console.log('keydown', e);
-                switch (e.keyCode) {
-                    case 37:
-                    case 38:
-                    case 39:
-                    case 40:
-                    case 13:
-                        break;
-                    case 10009:
-                    case 10182:
-                        console.log('return888888888888888888888888');
-                        break;
-                    default:
-                        console.log('Key code : ' + e.keyCode);
-                        break;
-                }
-            });
-        };
-
-        document.body.appendChild(el);
+        } catch (error) {
+            showLoadError('خطا در اجرای build.js: ' + error.message);
+        }
     }
-
-    startLoad();
 </script>
+<script
+    src="file:///android_asset/js/build.js"
+    onload="onBuildLoaded()"
+    onerror="showLoadError('فایل build.js پیدا نشد یا لود نشد')"
+></script>
 </body>
 </html>
