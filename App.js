@@ -6,16 +6,27 @@
  * @flow strict-local
  */
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, {
+  useEffect,
+  useState,
+  useMemo,
+  useCallback,
+  useRef,
+  memo,
+} from "react";
 import type { Node } from "react";
 import {
   StyleSheet,
+  View,
   BackHandler,
   Platform,
   Linking,
   Alert,
+  Image,
   PermissionsAndroid,
-  TVEventHandler, I18nManager,
+  I18nManager,
+  Dimensions,
+  DeviceEventEmitter,
 } from "react-native";
 
 import { Colors, Header } from "react-native/Libraries/NewAppScreen";
@@ -28,10 +39,91 @@ import RNExitApp from "react-native-exit-app";
 import { getMacLanAddress } from "react-native-device-info/src/index";
 
 let webview = {};
-let _tvEventHandler: any;
+let webviewLayoutInitialized = false;
+let videoReadyUrl = "";
+
+const normalizeVideoUrl = (url) => (url || "").trim().replace(/\/+$/, "");
+
+const VideoPlayer = memo(
+  ({
+    playerUrl,
+    posterUrl,
+    showPoster,
+    rateVideo,
+    onVideoReady,
+  }) => {
+    const player = useRef(null);
+
+    if (!playerUrl) {
+      return null;
+    }
+
+    return (
+      <View
+        style={styles.videoLayerInner}
+        collapsable={false}
+        renderToHardwareTextureAndroid={true}
+        pointerEvents="none"
+      >
+        <Video
+          paused={false}
+          resizeMode="cover"
+          source={{ uri: playerUrl }}
+          ref={player}
+          onReadyForDisplay={onVideoReady}
+          rate={rateVideo}
+          repeat={true}
+          controls={false}
+          playInBackground={true}
+          playWhenInactive={true}
+          ignoreSilentSwitch="ignore"
+          useTextureView={true}
+          pointerEvents="none"
+          style={[
+            styles.videoFullscreen,
+            showPoster && styles.videoLoading,
+          ]}
+        />
+        {showPoster && posterUrl ? (
+          <Image
+            source={{ uri: posterUrl }}
+            resizeMode="cover"
+            pointerEvents="none"
+            style={[styles.videoFullscreen, styles.posterOverlay]}
+          />
+        ) : null}
+      </View>
+    );
+  },
+  (prev, next) =>
+    prev.playerUrl === next.playerUrl &&
+    prev.posterUrl === next.posterUrl &&
+    prev.showPoster === next.showPoster &&
+    prev.rateVideo === next.rateVideo,
+);
+
+const PANEL_WIDTH = 350;
+const PANEL_IDLE_MS = 5000;
+const PANEL_DEBUG = true;
+const ENTER_KEY_CODES = {
+  23: true,
+  66: true,
+  160: true,
+};
+
+const logPanel = (...args) => {
+  if (PANEL_DEBUG) {
+    console.log("[PanelIdle]", ...args);
+  }
+};
+const screenSize = Dimensions.get("screen");
+const windowSize = Dimensions.get("window");
+// RTL mirrors left/right — in RTL, left:0 = physical right edge
+const webviewSide = I18nManager.isRTL
+  ? { left: 0, right: undefined }
+  : { right: 0, left: undefined };
 
 const App: () => Node = () => {
-  let player = {};
   const [ref, setRef] = useState(true);
   const [spinner, setSpinner] = useState(true);
   const [deviceInfoReady, setDeviceInfoReady] = useState(false);
@@ -41,50 +133,123 @@ const App: () => Node = () => {
   const [videoShow, setVideoShow] = useState(false);
   const [playerUrl, setPlayerUrl] = useState("");
   const [posterUrl, setPosterUrl] = useState("");
+  const [showPoster, setShowPoster] = useState(false);
+  const playerUrlRef = useRef("");
+  const videoShowRef = useRef(false);
+  const isFullRef = useRef(false);
   const [rateVideo, setRateVideo] = useState(1.0);
   const [isFull, setIsFull] = useState(false);
   const [uid, setUid] = useState("");
   const [tvType, setTvType] = useState(1);
-  const [web, setWeb] = useState(1.0);
-  // const [videoDirection, setVideoDirection] = useState({});
-  const [fullScreenVideo, setFullScreenVideo] = useState({
-    position: "absolute",
-    width: "82%",
-    height: "100%",
-    left: 0, top: 0,
-  });
+  const [panelVisible, setPanelVisible] = useState(true);
+  const webviewRef = useRef(null);
+  const panelVisibleRef = useRef(true);
+  const webReadyRef = useRef(false);
+  const panelIdleTimerRef = useRef(null);
+  const resetPanelIdleRef = useRef(() => {});
 
+  const clearPanelIdleTimer = useCallback(() => {
+    if (panelIdleTimerRef.current) {
+      clearTimeout(panelIdleTimerRef.current);
+      panelIdleTimerRef.current = null;
+    }
+  }, []);
 
-  const _enableTVEventHandler = () => {
-    _tvEventHandler = new TVEventHandler();
-    _tvEventHandler.enable(this, function(cmp, evt) {
-      console.log(evt);
-      if (evt.eventType === "right") {
-      } else if (evt.eventType === "up") {
-      } else if (evt.eventType === "left") {
-      } else if (evt.eventType === "down") {
-      } else if (evt.eventType === "playPause") {
-      }
-    });
-  };
+  const schedulePanelHide = useCallback(() => {
+    clearPanelIdleTimer();
+    logPanel("idle timer started", PANEL_IDLE_MS + "ms");
+    panelIdleTimerRef.current = setTimeout(() => {
+      panelIdleTimerRef.current = null;
+      logPanel("idle timeout -> hiding panel");
+      setPanelVisible(false);
+    }, PANEL_IDLE_MS);
+  }, [clearPanelIdleTimer]);
 
+  const resetPanelIdle = useCallback((reason) => {
+    if (!panelVisibleRef.current || !webReadyRef.current) {
+      logPanel("idle reset skipped", reason, {
+        visible: panelVisibleRef.current,
+        webReady: webReadyRef.current,
+      });
+      return;
+    }
+    logPanel("idle reset", reason || "unknown");
+    schedulePanelHide();
+  }, [schedulePanelHide]);
+
+  resetPanelIdleRef.current = resetPanelIdle;
 
   useEffect(() => {
-    // alert(I18nManager.isRTL)
-    if(I18nManager.isRTL){
-      setFullScreenVideo({
-        position: "absolute",
-        width: "82%",
-        height: "100%",
-        right: 0, top: 0,})
-    }else{
-      setFullScreenVideo({
-        position: "absolute",
-        width: "82%",
-        height: "100%",
-        left: 0, top: 0,})
+    panelVisibleRef.current = panelVisible;
+  }, [panelVisible]);
+
+  useEffect(() => {
+    if (panelVisible && webReadyRef.current) {
+      schedulePanelHide();
+    } else if (!panelVisible) {
+      clearPanelIdleTimer();
+    }
+  }, [panelVisible, schedulePanelHide, clearPanelIdleTimer]);
+
+  useEffect(() => {
+    return () => {
+      clearPanelIdleTimer();
+    };
+  }, [clearPanelIdleTimer]);
+
+  useEffect(() => {
+    if (Platform.OS !== "android") {
+      return undefined;
     }
 
+    const subscription = DeviceEventEmitter.addListener(
+      "worldcupKeyEvent",
+      (keyCode) => {
+        if (!panelVisibleRef.current) {
+          if (ENTER_KEY_CODES[keyCode]) {
+            logPanel("Enter pressed -> showing panel");
+            setPanelVisible(true);
+          }
+          return;
+        }
+        resetPanelIdleRef.current("native-key:" + keyCode);
+      },
+    );
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    const ref = webviewRef.current || webview.ref;
+    if (!ref || !webReadyRef.current) {
+      return;
+    }
+
+    ref.injectJavaScript(
+      "(function(){window.__nativePanelVisible=" +
+        (panelVisible ? "true" : "false") +
+        ";if(window.dispatchEvent){window.dispatchEvent(new CustomEvent('nativePanelVisibility',{detail:{visible:" +
+        (panelVisible ? "true" : "false") +
+        "}}));}if(" +
+        (panelVisible ? "true" : "false") +
+        "&&window.lockPanelViewport){window.lockPanelViewport();}return true;})();",
+    );
+  }, [panelVisible]);
+
+  const dispatchBackToWebView = useCallback(() => {
+    resetPanelIdleRef.current("native-back");
+    const ref = webviewRef.current || webview.ref;
+    if (ref) {
+      ref.injectJavaScript(
+        "(function(){if(window.handleNativeBack){window.handleNativeBack();}return true;})();",
+      );
+    }
+    return true;
+  }, []);
+
+  useEffect(() => {
     Promise.all([
       DeviceInfo.getMacLanAddress().catch(() => ""),
       DeviceInfo.getMacAddress().catch(() => ""),
@@ -95,51 +260,26 @@ const App: () => Node = () => {
     });
   }, []);
   useEffect(() => {
-    // _enableTVEventHandler();
     if (Platform.OS === "android") {
-      BackHandler.addEventListener("hardwareBackPress", onAndroidBackPress);
+      const backSubscription = BackHandler.addEventListener(
+        "hardwareBackPress",
+        dispatchBackToWebView,
+      );
       dealWithPermissions();
+
+      const spinnerFallback = setTimeout(() => setSpinner(false), 25000);
+
+      return () => {
+        clearTimeout(spinnerFallback);
+        backSubscription.remove();
+      };
     }
 
     const spinnerFallback = setTimeout(() => setSpinner(false), 25000);
+    return () => clearTimeout(spinnerFallback);
+  }, [dispatchBackToWebView]);
 
-    return () => {
-      clearTimeout(spinnerFallback);
-      if (Platform.OS === "android") {
-        BackHandler.removeEventListener("hardwareBackPress");
-      }
-    };
-  }, []);
-
-  const onAndroidBackPress = () => {
-    //console.log(JSON.stringify(this.webView))
-    //this.webView.ref.goBack();
-    //return true;
-    //alert('back')
-    //webview.ref.goBack();
-    //console.log(webview.ref)
-
-    // webview.ref.injectJavaScript( "controller.$data.activePage =5" );
-    //  webview.ref.injectJavaScript( "var evt = new KeyboardEvent('eventali', {'keyCode':1, 'which':10009});window.dispatchEvent (evt);" );
-    //  webview.ref.injectJavaScript( "var evt = new KeyboardEvent('keydown', {'keyCode':1, 'which':10009});window.dispatchEvent (evt);" );
-
-    //webview.ref.injectJavaScript('controller.handleBack()');
-    //return true;
-    let params = { type: "returnPage", data: "" };
-    const param = JSON.stringify(params);
-    if (webview.ref) {
-      // console.log("backe app.js");
-      //webview.ref.injectJavaScript( 'window.controller.$emit("PostMessages", '+param+')' );
-      //webview.ref.goBack();
-      // webview.ref.injectJavaScript("handleBack()");
-      webview.ref.injectJavaScript("window.vm.$emit(\"PostMessages\", " + param + ")");
-
-      return true;
-    }
-    return false;
-  };
-
-  const sendDataInWebView = (type, data, calltype = "") => {
+  const sendDataInWebView = useCallback((type, data, calltype = "") => {
     // console.log('///////webviewRef = ',type,data,webview.ref);
     //alert('step3')
 
@@ -158,24 +298,50 @@ const App: () => Node = () => {
         webview.ref.injectJavaScript("window.vm.$emit(\"PostMessages\", " + param + ")");
       }
     }
-  };
+  }, []);
 
-  const playVideo = (data) => {
-    // console.log(data);
-    // console.log("play video -> " + data.video);
-    // console.log("play poster -> " + data.poster);
+  useEffect(() => {
+    playerUrlRef.current = playerUrl;
+  }, [playerUrl]);
 
-    setPlayerUrl(data.video);
-    setPosterUrl(data.poster);
+  useEffect(() => {
+    videoShowRef.current = videoShow;
+  }, [videoShow]);
+
+  useEffect(() => {
+    isFullRef.current = isFull;
+  }, [isFull]);
+
+  const playVideo = useCallback((data) => {
+    const nextUrl = normalizeVideoUrl(data && data.video);
+    const nextPoster = data && data.poster ? data.poster : "";
+    if (!nextUrl) {
+      return;
+    }
+
+    const currentUrl = normalizeVideoUrl(playerUrlRef.current);
+    if (videoShowRef.current && currentUrl === nextUrl && videoReadyUrl === nextUrl) {
+      return;
+    }
+
+    setPosterUrl(nextPoster);
+    setShowPoster(!!nextPoster);
+    setPlayerUrl(nextUrl);
     setVideoShow(true);
-  };
+  }, []);
 
-  const stopVideo = () => {
-    // console.log("stop videooooooooooo -> ");
+  const stopVideo = useCallback(() => {
+    videoReadyUrl = "";
     setVideoShow(false);
     setPlayerUrl("");
+    setPosterUrl("");
+    setShowPoster(false);
+  }, []);
 
-  };
+  const handleVideoReady = useCallback(() => {
+    videoReadyUrl = normalizeVideoUrl(playerUrlRef.current);
+    setShowPoster(false);
+  }, []);
 
   const loadAppData = () => {
 
@@ -269,8 +435,25 @@ const App: () => Node = () => {
     }
   };
 
-  const handleOnMessage = (event) => {
-    const { type, data } = JSON.parse(event.nativeEvent.data);
+  const markWebReady = useCallback((source) => {
+    if (webReadyRef.current) {
+      return;
+    }
+    webReadyRef.current = true;
+    logPanel("web ready", source);
+    resetPanelIdleRef.current(source);
+  }, []);
+
+  const handleOnMessage = useCallback((event) => {
+    let payload;
+    try {
+      payload = JSON.parse(event.nativeEvent.data);
+    } catch (error) {
+      logPanel("invalid webview message", event.nativeEvent.data);
+      return;
+    }
+
+    const { type, data } = payload;
     // alert('ver-->' + DeviceInfo.getSystemVersion() + 'packageName-->' + DeviceInfo.getBundleId() + 'model-->' + DeviceInfo.getModel() + 'androidId-->' + DeviceInfo.getUniqueId())
     // {ver:DeviceInfo.getSystemVersion(),packageName:DeviceInfo.getBundleId(),model:DeviceInfo.getModel(),androidId:DeviceInfo.getUniqueId()};
     // console.log('han
@@ -279,6 +462,10 @@ const App: () => Node = () => {
     switch (type) {
       case "webReady":
         setSpinner(false);
+        markWebReady("webReady-message");
+        break;
+      case "panelActivity":
+        resetPanelIdleRef.current("panelActivity");
         break;
       case "browser":
         handlePress(data);
@@ -302,156 +489,202 @@ const App: () => Node = () => {
         setRateVideo(data);
         break;
       case "fullscreen":
-
-        // alert(data);
-        // console.log(data, isFull);
-        if (data == true) {
-          setIsFull(true);
-          // console.log("changeValue");
-          setFullScreenVideo({
-            position: "absolute",
-            top: 0,
-            left: 0,
-            width: "100%",
-            height: "100%",
-          });
-        } else if (data == false) {
-          setIsFull(false);
-          if(I18nManager.isRTL){
-            setFullScreenVideo({
-              position: "absolute",
-              width: "82%",
-              height: "100%",
-              right: 0, top: 0,})
-          }else{
-            setFullScreenVideo({
-              position: "absolute",
-              width: "82%",
-              height: "100%",
-              left: 0, top: 0,})
-          }
-          // setFullScreenVideo({
-          //   position: "absolute", top: 0, left: 0,
-          //   width: "82%",
-          //   height: "100%",
-          // });
-        }
-        // console.log(isFull);
+        setIsFull(data == true);
         break;
       case "checkFullScreen":
-        sendDataInWebView("checkFullScreen", isFull);
-        // console.log('checkFullScreen',isVideoFullScreen);
+        sendDataInWebView("checkFullScreen", isFullRef.current);
         break;
       case "exit":
         RNExitApp.exitApp();
         break;
     }
-  };
+  }, [playVideo, stopVideo, sendDataInWebView, markWebReady]);
 
-  const onBuffer = () => {
-    console.log("onBuffer");
-  };
-
-  const videoError = (e) => {
-    console.log("videoError", e);
-  };
-
-  const _renderVideo = () => {
-    if (!videoShow) {
-      return <></>;
-    }
-
-    return (
-      <Video
-        paused={false}
-        resizeMode="cover"
-        source={{ uri: playerUrl }} // Can be a URL or a local file.
-        ref={(ref) => {
-          player.ref = ref;
-        }} // Store reference
-        onBuffer={onBuffer} // Callback when remote video is buffering
-        onError={videoError} // Callback when video cannot be loaded
-        poster={posterUrl}
-        rate={rateVideo}
-        repeat={true}
-        controls={true}
-        style={fullScreenVideo}
-
-      />
-    );
-  };
-
-  const renderWebview = () => {
+  const webViewSource = useMemo(() => {
     if (!deviceInfoReady) {
       return null;
     }
 
-    const webViewSource = {
+    return {
       uri:
-        "file:///android_asset/index.html?mac_lan=" +
+        "file:///android_asset/index.html?webview=1&mac_lan=" +
         macLan +
         "&version=" + DeviceInfo.getSystemVersion() +
         "&mac=" + macAddress +
         "&uid=" + uid +
-        "&tv_type=" + tvType,
+        "&tv_type=" + tvType +
+        "&panel_w=" + PANEL_WIDTH +
+        "&panel_h=" + windowSize.height +
+        "&screen_w=" + screenSize.width +
+        "&screen_h=" + screenSize.height,
+      baseUrl: "file:///android_asset/",
     };
+  }, [deviceInfoReady, macLan, macAddress, uid, tvType]);
+
+  const videoPanel = useMemo(() => {
+    if (!videoShow || !playerUrl) {
+      return null;
+    }
 
     return (
-
-      <WebView
-        onMessage={handleOnMessage}
-        originWhitelist={["*"]}
-        useWebKit={true}
-        allowFileAccess={true}
-        allowUniversalAccessFromFileURLs={true}
-        mediaPlaybackRequiresUserAction={false}
-        style={styles.webview}
-        source={webViewSource}
-        //         source={ { uri : "http://samyar.rasgames.ir/varzesh3/android/index.html?t="+new Date().getTime()}}
-        // source={{ uri: "https://www.varzesh3.com/" }}
-        ref={(ref) => {
-          webview.ref = ref;
-        }}
-        domStorageEnabled={true}
-        javaScriptEnabled={true}
-        sharedCookiesEnabled={true}
-        onNavigationStateChange={(navState) => {
-          webview.canGoBack = navState.canGoBack;
-        }}
-
-        // onError={syntheticEvent => {
-        //     navigation.replace( 'Control' );
-        // }}
+      <VideoPlayer
+        playerUrl={playerUrl}
+        posterUrl={posterUrl}
+        showPoster={showPoster}
+        rateVideo={rateVideo}
+        onVideoReady={handleVideoReady}
       />
-
     );
-  };
+  }, [videoShow, playerUrl, posterUrl, showPoster, rateVideo, handleVideoReady]);
+
+  const webviewPanel = useMemo(() => {
+    if (!webViewSource) {
+      return null;
+    }
+
+    return (
+      <WebView
+          onMessage={handleOnMessage}
+          originWhitelist={["*"]}
+          useWebKit={true}
+          allowFileAccess={true}
+          allowFileAccessFromFileURLs={true}
+          allowUniversalAccessFromFileURLs={true}
+          mixedContentMode="always"
+          mediaPlaybackRequiresUserAction={false}
+          style={styles.webview}
+          source={webViewSource}
+          ref={(ref) => {
+            webview.ref = ref;
+            webviewRef.current = ref;
+          }}
+          domStorageEnabled={true}
+          javaScriptEnabled={true}
+          sharedCookiesEnabled={true}
+          cacheEnabled={true}
+          cacheMode="LOAD_DEFAULT"
+          androidLayerType="none"
+          textZoom={100}
+          setBuiltInZoomControls={false}
+          scalesPageToFit={false}
+          startInLoadingState={false}
+          onNavigationStateChange={(navState) => {
+            webview.canGoBack = navState.canGoBack;
+          }}
+          onLayout={(event) => {
+            if (webviewLayoutInitialized) {
+              return;
+            }
+
+            const { width, height } = event.nativeEvent.layout;
+            if (width <= 0 || height <= 0 || !webview.ref) {
+              return;
+            }
+
+            webviewLayoutInitialized = true;
+            webview.ref.injectJavaScript(
+              "(function(){window.__nativePanelHeight=" +
+                height +
+                ";window.__nativePanelWidth=" +
+                width +
+                ";if(window.lockPanelViewport){window.lockPanelViewport();}return true;})();",
+            );
+          }}
+          onLoadEnd={() => {
+            setSpinner(false);
+            if (webview.ref) {
+              webview.ref.injectJavaScript(
+                "(function(){if(window.lockPanelViewport){window.lockPanelViewport();}return true;})();",
+              );
+            }
+            setTimeout(() => {
+              if (!webReadyRef.current) {
+                markWebReady("onLoadEnd-fallback");
+              }
+            }, 3000);
+          }}
+        />
+    );
+  }, [webViewSource, handleOnMessage, markWebReady]);
 
 
   return (
-
-    <>
+    <View style={styles.container}>
+      <View style={styles.videoLayer} pointerEvents="none" collapsable={false}>
+        {videoPanel}
+      </View>
+      {webviewPanel ? (
+        <View
+          style={[
+            styles.webviewOverlay,
+            webviewSide,
+            !panelVisible && styles.webviewOverlayHidden,
+          ]}
+          pointerEvents={panelVisible ? "auto" : "none"}
+          collapsable={false}
+        >
+          {webviewPanel}
+        </View>
+      ) : null}
       <Spinner
         visible={spinner}
         textContent={""}
         overlayColor="rgba(13, 13, 13, 0.95)"
         textStyle={{ color: "#ffffff" }}
       />
-      {renderWebview()}
-      {_renderVideo()}
-    </>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  webview: {
+  container: {
     flex: 1,
     backgroundColor: "#0d0d0d",
+    overflow: "hidden",
   },
-  Pdirection: {     position: "absolute",
+  videoLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 0,
+    elevation: 0,
+  },
+  videoLayerInner: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  videoFullscreen: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  webviewOverlay: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    width: PANEL_WIDTH,
+    zIndex: 100,
+    elevation: 100,
+    direction: "ltr",
+    overflow: "hidden",
+    backgroundColor: "transparent",
+  },
+  webviewOverlayHidden: {
+    opacity: 0,
+    width: 0,
+  },
+  webview: {
+    flex: 1,
+    width: PANEL_WIDTH,
+    backgroundColor: "transparent",
+  },
+  videoLoading: {
+    opacity: 0,
+  },
+  posterOverlay: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  Pdirection: {
+    position: "absolute",
     width: "82%",
     height: "100%",
-    left: 0, top: 0, },
+    left: 0, top: 0,
+  },
   EDirection: { left: 0 },
 });
 export default App;

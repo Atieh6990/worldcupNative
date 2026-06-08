@@ -5,7 +5,16 @@
  * @format
  */
 
+const exclusionList = require("metro-config/src/defaults/exclusionList");
+
 module.exports = {
+  watchFolders: [],
+  resolver: {
+    blockList: exclusionList([
+      /android\/app\/build\/.*/,
+      /android\/build\/.*/,
+    ]),
+  },
   transformer: {
     getTransformOptions: async () => ({
       transform: {

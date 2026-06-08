@@ -7,7 +7,12 @@
     "ios": "react-native run-ios",
     "start": "react-native start",
     "test": "jest",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "tv:connect": "powershell -ExecutionPolicy Bypass -File scripts/tv-dev.ps1 -Action connect",
+    "tv:reverse": "powershell -ExecutionPolicy Bypass -File scripts/tv-dev.ps1 -Action reverse",
+    "tv:inspect": "powershell -ExecutionPolicy Bypass -File scripts/tv-dev.ps1 -Action inspect",
+    "tv:reload": "powershell -ExecutionPolicy Bypass -File scripts/tv-dev.ps1 -Action reload",
+    "tv:run": "powershell -ExecutionPolicy Bypass -File scripts/tv-dev.ps1 -Action run -Ip 172.16.10.5"
   },
   "dependencies": {
     "react": "18.1.0",
