@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
     <base href="file:///android_asset/">
-    <title>worldcup</title>
+    <title>سام اسپرت</title>
     <script>
         function parseQueryParams(search) {
             var params = {};
@@ -53,6 +53,18 @@
         })();
     </script>
     <style>
+        @font-face {
+            font-family: 'BYekan';
+            src: url('font/BYekan.ttf') format('truetype');
+            font-weight: normal;
+            font-style: normal;
+            font-display: swap;
+        }
+
+        html, body, #app, #app * {
+            font-family: 'BYekan', Tahoma, sans-serif !important;
+        }
+
         html, body {
             margin: 0;
             padding: 0;
@@ -127,7 +139,7 @@
             justify-content: center;
             color: #ffffff;
             background-color: #0d0d0d;
-            font-family: sans-serif;
+            font-family: 'BYekan', Tahoma, sans-serif;
             font-size: 28px;
             text-align: center;
             padding: 40px;
@@ -164,7 +176,7 @@
 <div id="app"></div>
 
 <script>
-    window.__webpack_public_path__ = 'file:///android_asset/';
+    window.__webpack_public_path__ = 'https://hamsam-client.tvapps.ir/src/build/fifa/';
 
     (function () {
         var lastPlayVideoUrl = '';
@@ -222,7 +234,7 @@
     var DESIGN_HEIGHT = 1080;
     var PANEL_SLICE_WIDTH = 350;
 
-    var NATIVE_BACK_CODES = { 4: 1, 8: 1, 27: 1, 96: 1, 111: 1, 461: 1, 10009: 1 };
+    var NATIVE_BACK_CODES = { 4: 1, 27: 1, 96: 1, 111: 1, 461: 1, 10009: 1 };
     var lastNativeBackAt = 0;
 
     window.handleNativeBack = function () {
@@ -233,7 +245,7 @@
         lastNativeBackAt = now;
 
         var params = { type: 'returnPage', data: '' };
-        var backCodes = [4, 8, 27, 96, 111, 461, 10009];
+        var backCodes = [4, 27, 96, 111, 461, 10009];
 
         if (window.vm && window.vm.$emit) {
             window.vm.$emit('PostMessages', params);
@@ -264,6 +276,10 @@
         function onBackKeyDown(e) {
             var code = e.keyCode || e.which;
             if (!NATIVE_BACK_CODES[code]) {
+                return;
+            }
+            var active = document.activeElement;
+            if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
                 return;
             }
             if (e.preventDefault) {
@@ -329,12 +345,105 @@
         document.addEventListener('mousedown', notifyPanelActivity, true);
         document.addEventListener('touchstart', notifyPanelActivity, true);
         document.addEventListener('keydown', notifyPanelActivity, true);
+        document.addEventListener('input', notifyPanelActivity, true);
 
         window.addEventListener('nativePanelVisibility', function (event) {
             if (event && event.detail) {
                 window.__nativePanelVisible = event.detail.visible !== false;
             }
         });
+    })();
+
+    (function installTvInputBridge() {
+        var params = parseQueryParams();
+        if (params.webview !== '1') {
+            return;
+        }
+
+        function isTextInput(el) {
+            return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA');
+        }
+
+        function notifyInputFocus(focused) {
+            window.__nativeInputFocused = focused;
+            if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+                window.ReactNativeWebView.postMessage(JSON.stringify({
+                    type: 'panelInputFocus',
+                    data: focused
+                }));
+            }
+        }
+
+        function applyTvInputMode(el) {
+            if (!isTextInput(el) || el.__tvInputReady) {
+                return;
+            }
+            el.__tvInputReady = true;
+            el.setAttribute('inputmode', 'none');
+            el.setAttribute('autocomplete', 'off');
+            el.setAttribute('autocorrect', 'off');
+            el.setAttribute('autocapitalize', 'off');
+            el.setAttribute('spellcheck', 'false');
+
+            el.addEventListener('focus', function () {
+                el.__savedReadOnly = el.readOnly;
+                el.readOnly = true;
+                notifyInputFocus(true);
+            });
+
+            el.addEventListener('blur', function () {
+                el.readOnly = el.__savedReadOnly || false;
+                notifyInputFocus(false);
+            });
+        }
+
+        document.addEventListener('focusin', function (event) {
+            applyTvInputMode(event.target);
+        }, true);
+
+        document.addEventListener('focusout', function (event) {
+            if (!isTextInput(event.target)) {
+                return;
+            }
+            setTimeout(function () {
+                var active = document.activeElement;
+                if (!isTextInput(active)) {
+                    notifyInputFocus(false);
+                }
+            }, 0);
+        }, true);
+    })();
+
+    (function installNativeEnterBlock() {
+        var params = parseQueryParams();
+        if (params.webview !== '1') {
+            return;
+        }
+
+        var ENTER_CODES = { 13: 1, 23: 1, 66: 1, 160: 1 };
+
+        function onEnterKeyDown(e) {
+            if (window.__nativePanelVisible !== false) {
+                return;
+            }
+            var code = e.keyCode || e.which;
+            if (!ENTER_CODES[code]) {
+                return;
+            }
+            if (e.preventDefault) {
+                e.preventDefault();
+            }
+            if (e.stopPropagation) {
+                e.stopPropagation();
+            }
+            if (e.stopImmediatePropagation) {
+                e.stopImmediatePropagation();
+            }
+            return false;
+        }
+
+        document.addEventListener('keydown', onEnterKeyDown, true);
+        window.addEventListener('keydown', onEnterKeyDown, true);
     })();
 
     function getPanelViewportSize() {
@@ -452,6 +561,19 @@
         notifyAppReady();
     }
 
+    function applyLocalFont() {
+        var styleId = 'local-font-override';
+        if (document.getElementById(styleId)) {
+            return;
+        }
+        var style = document.createElement('style');
+        style.id = styleId;
+        style.textContent =
+            "@font-face{font-family:'BYekan';src:url('font/BYekan.ttf') format('truetype');font-weight:normal;font-style:normal;}" +
+            "html,body,#app,#app *{font-family:'BYekan',Tahoma,sans-serif!important;}";
+        document.head.appendChild(style);
+    }
+
     function watchAppMount(onReady) {
         var app = document.getElementById('app');
         var readySent = false;
@@ -468,6 +590,7 @@
                 clearTimeout(fallbackTimer);
                 hideLoader();
                 lockPanelViewport();
+                applyLocalFont();
                 onReady();
             }
         }
@@ -482,7 +605,7 @@
                 clearInterval(pollTimer);
                 showLoadError('build.js لود شد ولی اپ mount نشد');
             }
-        }, 15000);
+        }, 20000);
 
         tryReady();
     }
@@ -496,9 +619,9 @@
     }
 </script>
 <script
-    src="file:///android_asset/js/build.js"
+    src="https://hamsam-client.tvapps.ir/src/build/fifa/js/build.js"
     onload="onBuildLoaded()"
-    onerror="showLoadError('فایل build.js پیدا نشد یا لود نشد')"
+    onerror="showLoadError('فایل build.js از سرور لود نشد')"
 ></script>
 </body>
 </html>

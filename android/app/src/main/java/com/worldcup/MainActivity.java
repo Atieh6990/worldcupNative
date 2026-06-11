@@ -6,6 +6,7 @@ import com.facebook.react.ReactRootView;
 
 import android.os.Bundle; // needed for onCreate method
 import android.view.KeyEvent;
+import android.view.WindowManager;
 import com.facebook.react.ReactInstanceManager;
 import com.facebook.react.bridge.ReactContext;
 import com.facebook.react.modules.core.DeviceEventManagerModule;
@@ -16,6 +17,7 @@ public class MainActivity extends ReactActivity {
 @Override
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
+    getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
     I18nUtil sharedI18nUtilInstance = I18nUtil.getInstance();
     sharedI18nUtilInstance.allowRTL(getApplicationContext(), false);
     sharedI18nUtilInstance.forceRTL(getApplicationContext(), false);
@@ -79,7 +81,6 @@ public class MainActivity extends ReactActivity {
     return keyCode == KeyEvent.KEYCODE_BACK
         || keyCode == KeyEvent.KEYCODE_ESCAPE
         || keyCode == KeyEvent.KEYCODE_BUTTON_B
-        || keyCode == 8
         || keyCode == 27
         || keyCode == 10009
         || keyCode == 461;

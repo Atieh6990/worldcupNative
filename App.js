@@ -1,7 +1,4 @@
 /**
- * Sample React Native App
- * https://github.com/facebook/react-native
- *
  * @format
  * @flow strict-local
  */
@@ -23,20 +20,18 @@ import {
   Linking,
   Alert,
   Image,
+  Text,
   PermissionsAndroid,
   I18nManager,
   Dimensions,
   DeviceEventEmitter,
 } from "react-native";
 
-import { Colors, Header } from "react-native/Libraries/NewAppScreen";
 import Video from "react-native-video";
 import { WebView } from "react-native-webview";
 import Spinner from "react-native-loading-spinner-overlay";
-// import SharedGroupPreferences from "react-native-shared-group-preferences";
 import DeviceInfo from "react-native-device-info";
 import RNExitApp from "react-native-exit-app";
-import { getMacLanAddress } from "react-native-device-info/src/index";
 
 let webview = {};
 let webviewLayoutInitialized = false;
@@ -49,10 +44,13 @@ const VideoPlayer = memo(
     playerUrl,
     posterUrl,
     showPoster,
+    overlayMessage,
+    webviewOnRight,
     rateVideo,
     onVideoReady,
   }) => {
     const player = useRef(null);
+    const shouldPlayVideo = !!playerUrl;
 
     if (!playerUrl) {
       return null;
@@ -65,32 +63,84 @@ const VideoPlayer = memo(
         renderToHardwareTextureAndroid={true}
         pointerEvents="none"
       >
-        <Video
-          paused={false}
-          resizeMode="cover"
-          source={{ uri: playerUrl }}
-          ref={player}
-          onReadyForDisplay={onVideoReady}
-          rate={rateVideo}
-          repeat={true}
-          controls={false}
-          playInBackground={true}
-          playWhenInactive={true}
-          ignoreSilentSwitch="ignore"
-          useTextureView={true}
-          pointerEvents="none"
-          style={[
-            styles.videoFullscreen,
-            showPoster && styles.videoLoading,
-          ]}
-        />
-        {showPoster && posterUrl ? (
-          <Image
-            source={{ uri: posterUrl }}
+        {shouldPlayVideo ? (
+          <Video
+            paused={false}
             resizeMode="cover"
+            source={{ uri: playerUrl }}
+            ref={player}
+            onReadyForDisplay={onVideoReady}
+            rate={rateVideo}
+            repeat={true}
+            controls={false}
+            playInBackground={true}
+            playWhenInactive={true}
+            ignoreSilentSwitch="ignore"
+            useTextureView={true}
             pointerEvents="none"
-            style={[styles.videoFullscreen, styles.posterOverlay]}
+            style={[
+              styles.videoFullscreen,
+              showPoster && styles.videoLoading,
+            ]}
           />
+        ) : null}
+        {showPoster ? (
+          <>
+            {posterUrl ? (
+              <Image
+                source={{ uri: posterUrl }}
+                resizeMode="cover"
+                pointerEvents="none"
+                style={[styles.videoFullscreen, styles.posterOverlay]}
+              />
+            ) : (
+              <View
+                pointerEvents="none"
+                style={[styles.videoFullscreen, styles.posterFallback]}
+              />
+            )}
+            {overlayMessage ? (
+              <View
+                pointerEvents="none"
+                style={[
+                  styles.videoMessageAnchor,
+                  webviewOnRight
+                    ? { right: PANEL_WIDTH }
+                    : { left: PANEL_WIDTH },
+                ]}
+              >
+                <Text
+                  numberOfLines={1}
+                  ellipsizeMode="clip"
+                  style={[
+                    styles.videoMessageText,
+                    webviewOnRight
+                      ? styles.videoMessageTextRight
+                      : styles.videoMessageTextLeft,
+                    webviewOnRight
+                      ? {
+                          transform: [
+                            {
+                              translateX: VIDEO_MESSAGE_OFFSET_TOWARD_WEBVIEW,
+                            },
+                            { translateY: -VIDEO_MESSAGE_OFFSET_UP },
+                          ],
+                        }
+                      : {
+                          transform: [
+                            {
+                              translateX: -VIDEO_MESSAGE_OFFSET_TOWARD_WEBVIEW,
+                            },
+                            { translateY: -VIDEO_MESSAGE_OFFSET_UP },
+                          ],
+                        },
+                  ]}
+                >
+                  {overlayMessage}
+                </Text>
+              </View>
+            ) : null}
+          </>
         ) : null}
       </View>
     );
@@ -99,12 +149,16 @@ const VideoPlayer = memo(
     prev.playerUrl === next.playerUrl &&
     prev.posterUrl === next.posterUrl &&
     prev.showPoster === next.showPoster &&
+    prev.overlayMessage === next.overlayMessage &&
+    prev.webviewOnRight === next.webviewOnRight &&
     prev.rateVideo === next.rateVideo,
 );
 
 const PANEL_WIDTH = 350;
-const PANEL_IDLE_MS = 5000;
-const PANEL_DEBUG = true;
+const VIDEO_MESSAGE_OFFSET_TOWARD_WEBVIEW = 140;
+const VIDEO_MESSAGE_OFFSET_UP = 105;
+const PANEL_IDLE_MS = 20000;
+const PANEL_DEBUG = false;
 const ENTER_KEY_CODES = {
   23: true,
   66: true,
@@ -118,21 +172,20 @@ const logPanel = (...args) => {
 };
 const screenSize = Dimensions.get("screen");
 const windowSize = Dimensions.get("window");
-// RTL mirrors left/right — in RTL, left:0 = physical right edge
 const webviewSide = I18nManager.isRTL
   ? { left: 0, right: undefined }
   : { right: 0, left: undefined };
+const webviewOnRight = !I18nManager.isRTL;
 
 const App: () => Node = () => {
-  const [ref, setRef] = useState(true);
   const [spinner, setSpinner] = useState(true);
   const [deviceInfoReady, setDeviceInfoReady] = useState(false);
-  const [userData, setUserData] = useState({});
   const [macAddress, setMacAddress] = useState("");
   const [macLan, setMacLan] = useState("");
   const [videoShow, setVideoShow] = useState(false);
   const [playerUrl, setPlayerUrl] = useState("");
   const [posterUrl, setPosterUrl] = useState("");
+  const [videoOverlayMessage, setVideoOverlayMessage] = useState("");
   const [showPoster, setShowPoster] = useState(false);
   const playerUrlRef = useRef("");
   const videoShowRef = useRef(false);
@@ -147,6 +200,7 @@ const App: () => Node = () => {
   const webReadyRef = useRef(false);
   const panelIdleTimerRef = useRef(null);
   const resetPanelIdleRef = useRef(() => {});
+  const inputFocusedRef = useRef(false);
 
   const clearPanelIdleTimer = useCallback(() => {
     if (panelIdleTimerRef.current) {
@@ -156,17 +210,45 @@ const App: () => Node = () => {
   }, []);
 
   const schedulePanelHide = useCallback(() => {
+    if (inputFocusedRef.current) {
+      logPanel("idle timer skipped - input focused");
+      return;
+    }
     clearPanelIdleTimer();
     logPanel("idle timer started", PANEL_IDLE_MS + "ms");
     panelIdleTimerRef.current = setTimeout(() => {
       panelIdleTimerRef.current = null;
+      if (inputFocusedRef.current) {
+        logPanel("idle timeout skipped - input focused");
+        return;
+      }
       logPanel("idle timeout -> hiding panel");
       setPanelVisible(false);
     }, PANEL_IDLE_MS);
   }, [clearPanelIdleTimer]);
 
+  const setInputFocused = useCallback(
+    (focused) => {
+      inputFocusedRef.current = focused;
+      if (focused) {
+        clearPanelIdleTimer();
+        logPanel("idle paused - input focused");
+        return;
+      }
+      if (panelVisibleRef.current && webReadyRef.current) {
+        schedulePanelHide();
+      }
+    },
+    [clearPanelIdleTimer, schedulePanelHide]
+    ,
+  );
+
   const resetPanelIdle = useCallback((reason) => {
-    if (!panelVisibleRef.current || !webReadyRef.current) {
+    if (
+      !panelVisibleRef.current ||
+      !webReadyRef.current ||
+      inputFocusedRef.current
+    ) {
       logPanel("idle reset skipped", reason, {
         visible: panelVisibleRef.current,
         webReady: webReadyRef.current,
@@ -179,6 +261,25 @@ const App: () => Node = () => {
 
   resetPanelIdleRef.current = resetPanelIdle;
 
+  const focusWebViewPanel = useCallback(() => {
+    if (Platform.OS !== "android") {
+      return;
+    }
+    const ref = webviewRef.current || webview.ref;
+    if (ref && typeof ref.requestFocus === "function") {
+      ref.requestFocus();
+    }
+  }, []);
+
+  const scheduleWebViewFocus = useCallback(() => {
+    if (Platform.OS !== "android") {
+      return;
+    }
+    setTimeout(() => {
+      focusWebViewPanel();
+    }, 150);
+  }, [focusWebViewPanel]);
+
   useEffect(() => {
     panelVisibleRef.current = panelVisible;
   }, [panelVisible]);
@@ -186,10 +287,11 @@ const App: () => Node = () => {
   useEffect(() => {
     if (panelVisible && webReadyRef.current) {
       schedulePanelHide();
+      scheduleWebViewFocus();
     } else if (!panelVisible) {
       clearPanelIdleTimer();
     }
-  }, [panelVisible, schedulePanelHide, clearPanelIdleTimer]);
+  }, [panelVisible, schedulePanelHide, clearPanelIdleTimer, scheduleWebViewFocus]);
 
   useEffect(() => {
     return () => {
@@ -259,6 +361,7 @@ const App: () => Node = () => {
       setDeviceInfoReady(true);
     });
   }, []);
+
   useEffect(() => {
     if (Platform.OS === "android") {
       const backSubscription = BackHandler.addEventListener(
@@ -280,24 +383,23 @@ const App: () => Node = () => {
   }, [dispatchBackToWebView]);
 
   const sendDataInWebView = useCallback((type, data, calltype = "") => {
-    // console.log('///////webviewRef = ',type,data,webview.ref);
-    //alert('step3')
-
-    let params = { type: type, data: data };
+    const params = { type: type, data: data };
     const param = JSON.stringify(params);
-    // console.log("param", param);
 
-    if (webview.ref) {
-      if (calltype != "") {
-        if (JSON.parse(calltype).fromOnlineJs == 1) {
-          webview.ref.injectJavaScript("infoSsn.loginUserData(" + param + ")");
-          return false;
-        }
-
-      } else {
-        webview.ref.injectJavaScript("window.vm.$emit(\"PostMessages\", " + param + ")");
-      }
+    if (!webview.ref) {
+      return;
     }
+
+    if (calltype != "") {
+      if (JSON.parse(calltype).fromOnlineJs == 1) {
+        webview.ref.injectJavaScript("infoSsn.loginUserData(" + param + ")");
+      }
+      return;
+    }
+
+    webview.ref.injectJavaScript(
+      "window.vm.$emit(\"PostMessages\", " + param + ")",
+    );
   }, []);
 
   useEffect(() => {
@@ -320,12 +422,19 @@ const App: () => Node = () => {
     }
 
     const currentUrl = normalizeVideoUrl(playerUrlRef.current);
-    if (videoShowRef.current && currentUrl === nextUrl && videoReadyUrl === nextUrl) {
+    if (
+      videoShowRef.current &&
+      currentUrl === nextUrl &&
+      videoReadyUrl === nextUrl
+    ) {
       return;
     }
 
     setPosterUrl(nextPoster);
-    setShowPoster(!!nextPoster);
+    setVideoOverlayMessage(
+      data && data.message ? String(data.message).trim() : "",
+    );
+    setShowPoster(true);
     setPlayerUrl(nextUrl);
     setVideoShow(true);
   }, []);
@@ -335,170 +444,115 @@ const App: () => Node = () => {
     setVideoShow(false);
     setPlayerUrl("");
     setPosterUrl("");
+    setVideoOverlayMessage("");
     setShowPoster(false);
   }, []);
 
   const handleVideoReady = useCallback(() => {
     videoReadyUrl = normalizeVideoUrl(playerUrlRef.current);
     setShowPoster(false);
+    setVideoOverlayMessage("");
   }, []);
 
   const loadAppData = () => {
-
-    let sendData = {
+    const sendData = {
       ver: DeviceInfo.getSystemVersion(),
       packageName: DeviceInfo.getBundleId(),
       model: DeviceInfo.getModel(),
       androidId: DeviceInfo.getUniqueId(),
     };
-    let params = {
-      type: "appData", data: JSON.stringify(sendData),
+    const params = {
+      type: "appData",
+      data: JSON.stringify(sendData),
     };
     const param = JSON.stringify(params);
     webview.ref.injectJavaScript("infoSsn.appData(" + param + ")");
   };
 
-  const loadUserDataFromSharedStorage = async (data) => {
-    try {
-      // alert('******webview', webview.ref);
-      const loadedData = await SharedGroupPreferences.getItem(
-        "savedData",
-        appGroupIdentifier,
-      );
-      // alert("step2" + loadedData);
-
-      sendDataInWebView("userData", loadedData, data);
-      //alert(JSON.stringify(loadedData));
-    } catch (errorCode) {
-
-      // alert('errorCode'+errorCode)
-      sendDataInWebView("userData", "null", data);
-    }
-  };
-
-  const saveUserDataToSharedStorage = async (data) => {
-    try {
-      const grantedStatus = await PermissionsAndroid.requestMultiple([
-        PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
-        PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
-      ]);
-      const writeGranted =
-        grantedStatus["android.permission.WRITE_EXTERNAL_STORAGE"] ===
-        PermissionsAndroid.RESULTS.GRANTED;
-      const readGranted =
-        grantedStatus["android.permission.READ_EXTERNAL_STORAGE"] ===
-        PermissionsAndroid.RESULTS.GRANTED;
-      if (writeGranted && readGranted) {
-        await SharedGroupPreferences.setItem(
-          "savedData",
-          data,
-          appGroupIdentifier,
-        );
-
-        sendDataInWebView("setTokenSuccess", "{}");
-      } else {
-        sendDataInWebView("setTokenError", "{}");
-      }
-    } catch (errorCode) {
-      //sendDataInWebView('setTokenError',{errorCode});
-      //console.log(errorCode)
-    }
-  };
-
   const dealWithPermissions = async () => {
     try {
-      const grantedStatus = await PermissionsAndroid.requestMultiple([
+      await PermissionsAndroid.requestMultiple([
         PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
         PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
       ]);
-      const writeGranted =
-        grantedStatus["android.permission.WRITE_EXTERNAL_STORAGE"] ===
-        PermissionsAndroid.RESULTS.GRANTED;
-      const readGranted =
-        grantedStatus["android.permission.READ_EXTERNAL_STORAGE"] ===
-        PermissionsAndroid.RESULTS.GRANTED;
     } catch (err) {
-      //console.warn(err)
+      // ignore permission errors on TV
     }
   };
 
   const handlePress = async (url) => {
-    // Checking if the link is supported for links with custom URL scheme.
     const supported = await Linking.canOpenURL(url);
 
     if (supported) {
-      // Opening the link with some app, if the URL scheme is "http" the web link should be opened
-      // by some browser in the mobile
       await Linking.openURL(url);
     } else {
       Alert.alert(`Don't know how to open this URL: ${url}`);
     }
   };
 
-  const markWebReady = useCallback((source) => {
-    if (webReadyRef.current) {
-      return;
-    }
-    webReadyRef.current = true;
-    logPanel("web ready", source);
-    resetPanelIdleRef.current(source);
-  }, []);
+  const markWebReady = useCallback(
+    (source) => {
+      if (webReadyRef.current) {
+        return;
+      }
+      webReadyRef.current = true;
+      logPanel("web ready", source);
+      resetPanelIdleRef.current(source);
+      scheduleWebViewFocus();
+    },
+    [scheduleWebViewFocus],
+  );
 
-  const handleOnMessage = useCallback((event) => {
-    let payload;
-    try {
-      payload = JSON.parse(event.nativeEvent.data);
-    } catch (error) {
-      logPanel("invalid webview message", event.nativeEvent.data);
-      return;
-    }
+  const handleOnMessage = useCallback(
+    (event) => {
+      let payload;
+      try {
+        payload = JSON.parse(event.nativeEvent.data);
+      } catch (error) {
+        logPanel("invalid webview message", event.nativeEvent.data);
+        return;
+      }
 
-    const { type, data } = payload;
-    // alert('ver-->' + DeviceInfo.getSystemVersion() + 'packageName-->' + DeviceInfo.getBundleId() + 'model-->' + DeviceInfo.getModel() + 'androidId-->' + DeviceInfo.getUniqueId())
-    // {ver:DeviceInfo.getSystemVersion(),packageName:DeviceInfo.getBundleId(),model:DeviceInfo.getModel(),androidId:DeviceInfo.getUniqueId()};
-    // console.log('han
-    // dleOnMessage type ===>  ' , JSON.parse(event.nativeEvent.data));
-    // console.log('handleOnMessage data ===>  ' , data , type);
-    switch (type) {
-      case "webReady":
-        setSpinner(false);
-        markWebReady("webReady-message");
-        break;
-      case "panelActivity":
-        resetPanelIdleRef.current("panelActivity");
-        break;
-      case "browser":
-        handlePress(data);
-        break;
-      case "setToken":
-        // saveUserDataToSharedStorage(data);
-        break;
-      case "getToken":
-        // loadUserDataFromSharedStorage(data);
-        break;
-      case "getPkgName":
-        loadAppData();
-        break;
-      case "playVideo":
-        playVideo(data);
-        break;
-      case "stopVideo":
-        stopVideo(data);
-        break;
-      case "rateVideo":
-        setRateVideo(data);
-        break;
-      case "fullscreen":
-        setIsFull(data == true);
-        break;
-      case "checkFullScreen":
-        sendDataInWebView("checkFullScreen", isFullRef.current);
-        break;
-      case "exit":
-        RNExitApp.exitApp();
-        break;
-    }
-  }, [playVideo, stopVideo, sendDataInWebView, markWebReady]);
+      const { type, data } = payload;
+      switch (type) {
+        case "webReady":
+          setSpinner(false);
+          markWebReady("webReady-message");
+          break;
+        case "panelActivity":
+          resetPanelIdleRef.current("panelActivity");
+          break;
+        case "panelInputFocus":
+          setInputFocused(data === true || data === "true");
+          break;
+        case "browser":
+          handlePress(data);
+          break;
+        case "getPkgName":
+          loadAppData();
+          break;
+        case "playVideo":
+          playVideo(data);
+          break;
+        case "stopVideo":
+          stopVideo(data);
+          break;
+        case "rateVideo":
+          setRateVideo(data);
+          break;
+        case "fullscreen":
+          setIsFull(data == true);
+          break;
+        case "checkFullScreen":
+          sendDataInWebView("checkFullScreen", isFullRef.current);
+          break;
+        case "exit":
+          RNExitApp.exitApp();
+          break;
+      }
+    },
+    [playVideo, stopVideo, sendDataInWebView, markWebReady, setInputFocused],
+  );
 
   const webViewSource = useMemo(() => {
     if (!deviceInfoReady) {
@@ -509,14 +563,22 @@ const App: () => Node = () => {
       uri:
         "file:///android_asset/index.html?webview=1&mac_lan=" +
         macLan +
-        "&version=" + DeviceInfo.getSystemVersion() +
-        "&mac=" + macAddress +
-        "&uid=" + uid +
-        "&tv_type=" + tvType +
-        "&panel_w=" + PANEL_WIDTH +
-        "&panel_h=" + windowSize.height +
-        "&screen_w=" + screenSize.width +
-        "&screen_h=" + screenSize.height,
+        "&version=" +
+        DeviceInfo.getSystemVersion() +
+        "&mac=" +
+        macAddress +
+        "&uid=" +
+        uid +
+        "&tv_type=" +
+        tvType +
+        "&panel_w=" +
+        PANEL_WIDTH +
+        "&panel_h=" +
+        windowSize.height +
+        "&screen_w=" +
+        screenSize.width +
+        "&screen_h=" +
+        screenSize.height,
       baseUrl: "file:///android_asset/",
     };
   }, [deviceInfoReady, macLan, macAddress, uid, tvType]);
@@ -531,11 +593,21 @@ const App: () => Node = () => {
         playerUrl={playerUrl}
         posterUrl={posterUrl}
         showPoster={showPoster}
+        overlayMessage={videoOverlayMessage}
+        webviewOnRight={webviewOnRight}
         rateVideo={rateVideo}
         onVideoReady={handleVideoReady}
       />
     );
-  }, [videoShow, playerUrl, posterUrl, showPoster, rateVideo, handleVideoReady]);
+  }, [
+    videoShow,
+    playerUrl,
+    posterUrl,
+    showPoster,
+    videoOverlayMessage,
+    rateVideo,
+    handleVideoReady,
+  ]);
 
   const webviewPanel = useMemo(() => {
     if (!webViewSource) {
@@ -544,69 +616,69 @@ const App: () => Node = () => {
 
     return (
       <WebView
-          onMessage={handleOnMessage}
-          originWhitelist={["*"]}
-          useWebKit={true}
-          allowFileAccess={true}
-          allowFileAccessFromFileURLs={true}
-          allowUniversalAccessFromFileURLs={true}
-          mixedContentMode="always"
-          mediaPlaybackRequiresUserAction={false}
-          style={styles.webview}
-          source={webViewSource}
-          ref={(ref) => {
-            webview.ref = ref;
-            webviewRef.current = ref;
-          }}
-          domStorageEnabled={true}
-          javaScriptEnabled={true}
-          sharedCookiesEnabled={true}
-          cacheEnabled={true}
-          cacheMode="LOAD_DEFAULT"
-          androidLayerType="none"
-          textZoom={100}
-          setBuiltInZoomControls={false}
-          scalesPageToFit={false}
-          startInLoadingState={false}
-          onNavigationStateChange={(navState) => {
-            webview.canGoBack = navState.canGoBack;
-          }}
-          onLayout={(event) => {
-            if (webviewLayoutInitialized) {
-              return;
-            }
+        onMessage={handleOnMessage}
+        originWhitelist={["*"]}
+        useWebKit={true}
+        allowFileAccess={true}
+        allowFileAccessFromFileURLs={true}
+        allowUniversalAccessFromFileURLs={true}
+        mixedContentMode="always"
+        mediaPlaybackRequiresUserAction={false}
+        style={styles.webview}
+        source={webViewSource}
+        ref={(ref) => {
+          webview.ref = ref;
+          webviewRef.current = ref;
+        }}
+        domStorageEnabled={true}
+        javaScriptEnabled={true}
+        sharedCookiesEnabled={true}
+        cacheEnabled={true}
+        cacheMode="LOAD_DEFAULT"
+        androidLayerType="none"
+        textZoom={100}
+        setBuiltInZoomControls={false}
+        scalesPageToFit={false}
+        startInLoadingState={false}
+        onNavigationStateChange={(navState) => {
+          webview.canGoBack = navState.canGoBack;
+        }}
+        onLayout={(event) => {
+          const { width, height } = event.nativeEvent.layout;
 
-            const { width, height } = event.nativeEvent.layout;
-            if (width <= 0 || height <= 0 || !webview.ref) {
-              return;
-            }
+          if (webviewLayoutInitialized) {
+            return;
+          }
 
-            webviewLayoutInitialized = true;
+          if (height <= 0 || !webview.ref) {
+            return;
+          }
+
+          webviewLayoutInitialized = true;
+          webview.ref.injectJavaScript(
+            "(function(){window.__nativePanelHeight=" +
+              height +
+              ";window.__nativePanelWidth=" +
+              width +
+              ";if(window.lockPanelViewport){window.lockPanelViewport();}return true;})();",
+          );
+        }}
+        onLoadEnd={() => {
+          setSpinner(false);
+          if (webview.ref) {
             webview.ref.injectJavaScript(
-              "(function(){window.__nativePanelHeight=" +
-                height +
-                ";window.__nativePanelWidth=" +
-                width +
-                ";if(window.lockPanelViewport){window.lockPanelViewport();}return true;})();",
+              "(function(){if(window.lockPanelViewport){window.lockPanelViewport();}return true;})();",
             );
-          }}
-          onLoadEnd={() => {
-            setSpinner(false);
-            if (webview.ref) {
-              webview.ref.injectJavaScript(
-                "(function(){if(window.lockPanelViewport){window.lockPanelViewport();}return true;})();",
-              );
+          }
+          setTimeout(() => {
+            if (!webReadyRef.current) {
+              markWebReady("onLoadEnd-fallback");
             }
-            setTimeout(() => {
-              if (!webReadyRef.current) {
-                markWebReady("onLoadEnd-fallback");
-              }
-            }, 3000);
-          }}
-        />
+          }, 3000);
+        }}
+      />
     );
   }, [webViewSource, handleOnMessage, markWebReady]);
-
 
   return (
     <View style={styles.container}>
@@ -679,12 +751,32 @@ const styles = StyleSheet.create({
   posterOverlay: {
     ...StyleSheet.absoluteFillObject,
   },
-  Pdirection: {
-    position: "absolute",
-    width: "82%",
-    height: "100%",
-    left: 0, top: 0,
+  posterFallback: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#0d0d0d",
   },
-  EDirection: { left: 0 },
+  videoMessageAnchor: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    justifyContent: "center",
+    zIndex: 2,
+    elevation: 2,
+  },
+  videoMessageText: {
+    color: "#ffffff",
+    fontSize: 17,
+    lineHeight: 26,
+    writingDirection: "rtl",
+    flexShrink: 0,
+  },
+  videoMessageTextRight: {
+    textAlign: "right",
+    alignSelf: "flex-end",
+  },
+  videoMessageTextLeft: {
+    textAlign: "right",
+    alignSelf: "flex-start",
+  },
 });
 export default App;
