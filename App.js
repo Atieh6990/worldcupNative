@@ -21,7 +21,6 @@ import {
   Alert,
   Image,
   Text,
-  PermissionsAndroid,
   I18nManager,
   Dimensions,
   DeviceEventEmitter,
@@ -368,8 +367,6 @@ const App: () => Node = () => {
         "hardwareBackPress",
         dispatchBackToWebView,
       );
-      dealWithPermissions();
-
       const spinnerFallback = setTimeout(() => setSpinner(false), 25000);
 
       return () => {
@@ -467,17 +464,6 @@ const App: () => Node = () => {
     };
     const param = JSON.stringify(params);
     webview.ref.injectJavaScript("infoSsn.appData(" + param + ")");
-  };
-
-  const dealWithPermissions = async () => {
-    try {
-      await PermissionsAndroid.requestMultiple([
-        PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
-        PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
-      ]);
-    } catch (err) {
-      // ignore permission errors on TV
-    }
   };
 
   const handlePress = async (url) => {
