@@ -339,7 +339,12 @@ const App: () => Node = () => {
     );
   }, [panelVisible]);
 
-  const dispatchBackToWebView = useCallback(() => {
+  const handleHardwareBackPress = useCallback(() => {
+    if (!panelVisibleRef.current) {
+      RNExitApp.exitApp();
+      return true;
+    }
+
     resetPanelIdleRef.current("native-back");
     const ref = webviewRef.current || webview.ref;
     if (ref) {
@@ -365,7 +370,7 @@ const App: () => Node = () => {
     if (Platform.OS === "android") {
       const backSubscription = BackHandler.addEventListener(
         "hardwareBackPress",
-        dispatchBackToWebView,
+        handleHardwareBackPress,
       );
       const spinnerFallback = setTimeout(() => setSpinner(false), 25000);
 
@@ -377,7 +382,7 @@ const App: () => Node = () => {
 
     const spinnerFallback = setTimeout(() => setSpinner(false), 25000);
     return () => clearTimeout(spinnerFallback);
-  }, [dispatchBackToWebView]);
+  }, [handleHardwareBackPress]);
 
   const sendDataInWebView = useCallback((type, data, calltype = "") => {
     const params = { type: type, data: data };
@@ -511,6 +516,10 @@ const App: () => Node = () => {
         case "panelInputFocus":
           setInputFocused(data === true || data === "true");
           break;
+        case "closePanel":
+          clearPanelIdleTimer();
+          setPanelVisible(false);
+          break;
         case "browser":
           handlePress(data);
           break;
@@ -537,7 +546,7 @@ const App: () => Node = () => {
           break;
       }
     },
-    [playVideo, stopVideo, sendDataInWebView, markWebReady, setInputFocused],
+    [playVideo, stopVideo, sendDataInWebView, markWebReady, setInputFocused, clearPanelIdleTimer],
   );
 
   const webViewSource = useMemo(() => {
