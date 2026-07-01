@@ -63,3 +63,7 @@ android/keystore.properties
 # Ruby / CocoaPods
 /ios/Pods/
 /vendor/bundle/
+.gradle/
+.gradle-home/
+**/.gradle/
+**/.gradle-home/
